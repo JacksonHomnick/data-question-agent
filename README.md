@@ -80,6 +80,33 @@ Run the tests (about 40 to 80 API calls):
 python run_evals.py
 ```
 
+## Use it in Slack
+
+`@mention` the bot with a question in any channel it's in. It replies in the thread with the answer, a data-quality warning when one applies, a preview of the result, and the SQL. It uses Slack's Socket Mode, so it connects out from your computer and needs no public server. It answers only while `slack_bot.py` is running.
+
+Set it up once:
+1. Go to [api.slack.com/apps](https://api.slack.com/apps), click **Create New App**, choose **From a manifest**, pick your workspace, and paste in `slack_manifest.yml`.
+2. Under **Basic Information > App-Level Tokens**, create a token with the `connections:write` scope. It starts with `xapp-`.
+3. Under **Install App**, install it to your workspace and copy the **Bot User OAuth Token**. It starts with `xoxb-`.
+4. Add both tokens to `.env`:
+
+```bash
+read -s "KEY?Paste the xoxb- bot token: " && echo "SLACK_BOT_TOKEN=$KEY" >> .env && unset KEY
+read -s "KEY?Paste the xapp- app token: " && echo "SLACK_APP_TOKEN=$KEY" >> .env && unset KEY
+```
+
+5. Invite the bot to a channel (`/invite @data-question-agent`), then start it:
+
+```bash
+python slack_bot.py
+```
+
+Test the Slack code without Slack or Gemini (no tokens needed):
+
+```bash
+python -m unittest discover tests
+```
+
 ## Files
 
 | File | Purpose |
@@ -89,6 +116,9 @@ python run_evals.py
 | `app.py` | The Streamlit page |
 | `evals/questions.json` | 20 test questions with reference SQL and expected quality flags |
 | `run_evals.py` | Scores answers and quality checks, and saves results to `evals/results/` |
+| `slack_bot.py` | The Slack front end: listens for @mentions and replies in the thread |
+| `slack_manifest.yml` | Slack app settings to paste in when creating the app |
+| `tests/test_slack_bot.py` | Tests for the Slack reply logic, using fake Slack and Gemini clients |
 
 ## Data
 

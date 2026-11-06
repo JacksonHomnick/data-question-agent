@@ -1,0 +1,23 @@
+# Paste this into api.slack.com/apps > Create New App > From a manifest.
+# Socket Mode means the bot connects out from your computer, so it needs no public server.
+display_information:
+  name: Data Question Agent
+  description: Answers plain-English questions about NYC taxi trips with its own SQL.
+features:
+  bot_user:
+    display_name: data-question-agent
+    always_online: false
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - chat:write
+settings:
+  event_subscriptions:
+    bot_events:
+      - app_mention
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false
