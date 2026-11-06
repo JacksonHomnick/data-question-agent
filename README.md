@@ -10,12 +10,13 @@ Most people on a team can't write SQL, so simple questions wait in an analyst's 
 
 ## How it works
 
-1. You type a question, like "Which borough had the most pickups?"
-2. Gemini (`gemini-3.5-flash-lite`, through Google's free API tier) reads the database schema and writes a DuckDB query.
-3. The `run_sql` tool runs the query read-only and returns the first rows. If the query fails, Gemini sees the error and fixes it.
-4. Gemini checks the quality rules. If its query reads a flagged column, it runs the same query on the clean data too.
-5. Gemini calls `show_result` with the final query, a short answer, a chart type, and any quality note.
-6. The page shows the answer, the chart, the table, the SQL, and a Data quality box when rules apply.
+1. You type a question, like "Which borough had the most pickups?" in the web page, in Slack, or through any MCP client.
+2. Retrieval finds the three most similar questions in a library of 25 examples with checked SQL, using Gemini's embedding model, and adds them to the prompt as patterns.
+3. Gemini (`gemini-3.5-flash-lite`, through Google's free API tier) reads the database schema and writes a DuckDB query.
+4. The `run_sql` tool runs the query read-only and returns the first rows. If the query fails, Gemini sees the error and fixes it.
+5. Gemini checks the quality rules. If its query reads a flagged column, it runs the same query on the clean data too.
+6. Gemini calls `show_result` with the final query, a short answer, a chart type, and any quality note. On its last allowed turn it must call `show_result`, so it can't spend every turn exploring.
+7. The answer goes back with the SQL and a data-quality warning when rules apply, and the question is logged with its time, tokens, and errors.
 
 ## Data quality check
 
@@ -48,10 +49,54 @@ Final live run (November 5, 2026, `gemini-3.5-flash-lite`):
 - **Answers: 20/20**
 - **Quality checks: 12/12**
 
+With retrieval (November 6, 2026), run once with examples and once with `--no-examples`:
+
+| | Answers | Quality checks | Queries run | Failed queries | Total time |
+|---|---|---|---|---|---|
+| With examples | 20/20 | 12/12 | 63 | 0 | 140 s |
+| Without examples | 20/20 | 12/12 | 68 | 1 | 164 s |
+
+Retrieval didn't change the score on this test set, which the agent already answers fully. It made the agent about 15% faster, with fewer exploratory queries and no failed ones. Tokens were about the same (101,188 with examples, 103,028 without), because the examples add prompt text but save turns. A harder test set would show more; that's a next step.
+
 How it got there:
 - Run 1 scored 18/20 on answers. Both misses were Google's servers returning "busy" (HTTP 503), not wrong answers, so the agent now waits and retries.
 - Run 2 scored 19/20. The one miss was the scorer: the agent answered "January 27, 2024," which is right, but the scorer only matched "2024-01-27." The scorer now reads written-out dates.
 - Run 3, the first with the quality check, scored 8/12 on quality checks. All four misses were the model flagging questions that only count trips, sometimes while its own note said no rule applied. The code now double-checks the model: a flag stays only when the query names a flagged column.
+
+## Retrieval
+
+`examples/examples.json` holds 25 questions with SQL that was run and checked against the database. `retrieval.py` embeds them once with `gemini-embedding-001` (cached in `data/`), embeds each new question, and passes the closest three to the model when their similarity is at least 0.65. Related taxi questions score about 0.78 to 0.84; an unrelated one ("What is the capital of France?") scored 0.58, so it gets no examples. None of the examples repeats a test question, so the test score stays honest. If the embedding call fails, the agent answers without examples.
+
+## Observability
+
+Every question, from every front end, is logged to `logs/queries.jsonl`: time, source (web, Slack, MCP, test), model, seconds, tokens, queries run, failed queries, examples used, whether a quality flag was raised, the final SQL, and any error. `python log_summary.py` turns the log into a table by source. The log has already paid off: it showed one run spending all 8 turns on `run_sql` without an answer, which led to the forced `show_result` on the last turn.
+
+## Use it from any MCP client
+
+`mcp_server.py` exposes the agent over the Model Context Protocol, so Claude Desktop, Claude Code, Cursor, or any other MCP client can use it as a tool. It has three read-only tools:
+
+| Tool | What it does |
+|---|---|
+| `ask_question` | The full agent: plain English in; answer, SQL, first rows, and quality note out |
+| `run_sql` | One read-only query, first 50 rows back as CSV |
+| `describe_database` | Tables, columns with notes, and the quality rules |
+
+To add it to Claude Desktop, put this in its config file (Settings > Developer > Edit Config), with your own paths:
+
+```json
+{
+  "mcpServers": {
+    "data-question-agent": {
+      "command": "/path/to/data-question-agent/.venv/bin/python",
+      "args": ["/path/to/data-question-agent/mcp_server.py"]
+    }
+  }
+}
+```
+
+## Live demo
+
+The web page runs on Streamlit Community Cloud. On a fresh server it downloads the data and builds the database on first start (about a minute). Its secrets hold the Gemini key, an optional `APP_PASSWORD`, and `DAILY_QUESTION_LIMIT` (default 50), which protects the free API quota.
 
 ## Design decisions
 
@@ -103,7 +148,7 @@ read -s "KEY?Paste the xapp- app token: " && echo "SLACK_APP_TOKEN=$KEY" >> .env
 python slack_bot.py
 ```
 
-Test the Slack code without Slack or Gemini (no tokens needed):
+Test the Slack and MCP code without any API calls (the MCP tests need the database):
 
 ```bash
 python -m unittest discover tests
@@ -114,10 +159,15 @@ python -m unittest discover tests
 | File | Purpose |
 |---|---|
 | `setup_data.py` | Downloads the data, builds `data/taxi.duckdb`, and creates the quality rules and clean view |
-| `agent.py` | The agent: prompt, tools, tool-use loop, and the quality-flag check |
-| `app.py` | The Streamlit page |
+| `agent.py` | The agent: prompt, tools, tool-use loop, quality-flag check, and query log |
+| `retrieval.py` | Finds similar example questions with embeddings |
+| `examples/examples.json` | 25 example questions with checked SQL |
+| `app.py` | The Streamlit page, with an optional password and a daily question cap for hosting |
+| `mcp_server.py` | The MCP server: `ask_question`, `run_sql`, and `describe_database` |
+| `log_summary.py` | Summarizes `logs/queries.jsonl` by source |
 | `evals/questions.json` | 20 test questions with reference SQL and expected quality flags |
-| `run_evals.py` | Scores answers and quality checks, and saves results to `evals/results/` |
+| `run_evals.py` | Scores answers and quality checks, and saves results to `evals/results/`; `--no-examples` turns retrieval off |
+| `tests/test_mcp_server.py` | Starts the MCP server like a real client and checks its tools (no API calls) |
 | `slack_bot.py` | The Slack front end: listens for @mentions and replies in the thread |
 | `slack_manifest.yml` | Slack app settings to paste in when creating the app |
 | `tests/test_slack_bot.py` | Tests for the Slack reply logic, using fake Slack and Gemini clients |

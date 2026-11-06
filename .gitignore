@@ -1,6 +1,8 @@
 .venv/
 data/
 evals/results/
+logs/
 __pycache__/
 .env
 .DS_Store
+.streamlit/secrets.toml

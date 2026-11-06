@@ -13,6 +13,7 @@ from __future__ import annotations
 import csv
 import json
 import re
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -94,6 +95,8 @@ def quality_check(case: dict, result) -> bool | None:
 
 
 def main() -> None:
+    # --no-examples turns retrieval off, to measure what the examples add.
+    use_examples = "--no-examples" not in sys.argv
     cases = json.loads(QUESTIONS.read_text())
     client = make_client()
     rows = []
@@ -105,7 +108,7 @@ def main() -> None:
         if i:
             time.sleep(PAUSE_SECONDS)
         expected = run_query(case["reference_sql"]).iloc[0, 0]
-        result = ask(case["question"], client=client)
+        result = ask(case["question"], client=client, use_examples=use_examples, source="eval")
         ok = not result.error and passes(case, expected, result)
         passed += ok
         print(f"{'PASS' if ok else 'FAIL'}  {case['id']:>2}. {case['question']}")
@@ -129,15 +132,19 @@ def main() -> None:
             "quality_note": result.quality_note,
             "clean_sql": result.clean_sql,
             "model": result.model,
+            "examples_used": " | ".join(result.examples_used),
+            "seconds": result.seconds,
+            "tokens": result.tokens,
             "passed": ok,
             "quality_passed": "" if quality is None else quality,
         })
 
-    print(f"\nScore: {passed}/{len(cases)}")
+    print(f"\nRetrieval: {'on' if use_examples else 'off'}")
+    print(f"Score: {passed}/{len(cases)}")
     print(f"Quality checks: {quality_passed}/{quality_cases}")
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    out = RESULTS_DIR / f"{datetime.now():%Y-%m-%d_%H%M}.csv"
+    out = RESULTS_DIR / f"{datetime.now():%Y-%m-%d_%H%M}{'' if use_examples else '_no-examples'}.csv"
     with out.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         writer.writeheader()

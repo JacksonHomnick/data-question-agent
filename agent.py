@@ -3,14 +3,19 @@
 Gemini gets two tools:
   run_sql      runs a read-only query and sees the first rows
   show_result  picks the final query, writes the answer, and picks a chart
+
+Before the first turn, retrieval.py finds similar example questions with
+checked SQL. Every question is logged to logs/queries.jsonl.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 import duckdb
@@ -18,8 +23,11 @@ import pandas as pd
 from google import genai
 from google.genai import errors, types
 
+import retrieval
+
 ENV_PATH = Path(__file__).parent / ".env"
 DB_PATH = Path(__file__).parent / "data" / "taxi.duckdb"
+LOG_PATH = Path(__file__).parent / "logs" / "queries.jsonl"
 # Tried in order if one is busy. Flash-Lite has the largest free daily limit.
 MODELS = ["gemini-3.5-flash-lite"]
 MAX_TURNS = 8
@@ -122,8 +130,43 @@ class Result:
     clean_data: pd.DataFrame | None = None
     quality_note: str = ""
     queries_run: list[str] = field(default_factory=list)
+    failed_queries: int = 0
+    examples_used: list[str] = field(default_factory=list)
     model: str = ""
+    tokens: int = 0
+    seconds: float = 0.0
     error: str = ""
+
+
+def log_result(result: Result, source: str) -> None:
+    """Append one line per question to logs/queries.jsonl: what ran, how long, what it cost."""
+    record = {
+        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "source": source,
+        "question": result.question,
+        "ok": not result.error and bool(result.sql),
+        "error": result.error,
+        "model": result.model,
+        "seconds": result.seconds,
+        "tokens": result.tokens,
+        "queries_run": len(result.queries_run),
+        "failed_queries": result.failed_queries,
+        "examples_used": result.examples_used,
+        "quality_flag": bool(result.quality_note),
+        "sql": result.sql,
+    }
+    LOG_PATH.parent.mkdir(exist_ok=True)
+    with LOG_PATH.open("a") as f:
+        f.write(json.dumps(record) + "\n")
+
+
+def questions_logged_today(source: str) -> int:
+    """How many questions one front end asked today (UTC), for the web page's daily cap."""
+    if not LOG_PATH.exists():
+        return 0
+    today = datetime.now(timezone.utc).date().isoformat()
+    records = (json.loads(line) for line in LOG_PATH.read_text().splitlines() if line)
+    return sum(1 for r in records if r["at"].startswith(today) and r["source"] == source)
 
 
 def describe_schema() -> str:
@@ -220,31 +263,54 @@ def make_client() -> genai.Client:
     ))
 
 
-def ask(question: str, client: genai.Client | None = None) -> Result:
+def ask(question: str, client: genai.Client | None = None, use_examples: bool = True, source: str = "cli") -> Result:
+    """Answer one question, time it, and log it. source says which front end asked (web, slack, mcp, eval)."""
     client = client or make_client()
+    started = time.monotonic()
     result = Result(question=question)
+    try:
+        _answer(question, client, use_examples, result)
+    finally:
+        result.seconds = round(time.monotonic() - started, 1)
+        log_result(result, source)
+    return result
+
+
+def _answer(question: str, client: genai.Client, use_examples: bool, result: Result) -> None:
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT.format(schema=describe_schema(), rules=describe_rules()),
         tools=TOOLS,
         # This file runs the tools itself, so turn off the SDK's automatic calling.
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
     )
-    contents: list[types.Content] = [types.Content(role="user", parts=[types.Part(text=question)])]
+    prompt = question
+    if use_examples:
+        examples = retrieval.similar_examples(question, client)
+        result.examples_used = [e["question"] for e in examples]
+        if examples:
+            prompt = f"{question}\n\n{retrieval.format_examples(examples)}"
+    contents: list[types.Content] = [types.Content(role="user", parts=[types.Part(text=prompt)])]
 
     models = MODELS
-    for _ in range(MAX_TURNS):
+    # On the last turn, require show_result so the model can't spend every turn exploring.
+    final_config = config.model_copy(update={"tool_config": types.ToolConfig(
+        function_calling_config=types.FunctionCallingConfig(mode="ANY", allowed_function_names=["show_result"]),
+    )})
+    for turn in range(MAX_TURNS):
         try:
-            response, model = generate(client, contents, config, models)
+            response, model = generate(client, contents, final_config if turn == MAX_TURNS - 1 else config, models)
             # Stay on one model for the whole question; its thought signatures only work with itself.
             models = [model]
             result.model = model
+            usage = response.usage_metadata
+            result.tokens += (usage.total_token_count or 0) if usage else 0
         except errors.APIError as exc:
             result.error = f"Gemini API error {exc.code}: {exc.message}"
-            return result
+            return
 
         if not response.candidates or response.candidates[0].content is None:
             result.error = "Gemini returned no answer for this question."
-            return result
+            return
 
         # Send the model's turn back unchanged; it carries the thought signatures Gemini needs.
         contents.append(response.candidates[0].content)
@@ -253,7 +319,7 @@ def ask(question: str, client: genai.Client | None = None) -> Result:
         if not calls:
             if not result.answer:
                 result.answer = (response.text or "").strip()
-            return result
+            return
 
         parts = []
         for call in calls:
@@ -262,6 +328,7 @@ def ask(question: str, client: genai.Client | None = None) -> Result:
             try:
                 data = run_query(sql)
             except Exception as exc:  # DuckDB errors go back to Gemini so it can fix the query.
+                result.failed_queries += 1
                 parts.append(types.Part(function_response=types.FunctionResponse(
                     id=call.id, name=call.name, response={"error": str(exc)},
                 )))
@@ -296,10 +363,10 @@ def ask(question: str, client: genai.Client | None = None) -> Result:
 
         contents.append(types.Content(role="user", parts=parts))
         if result.sql:
-            return result
+            return
 
     result.error = f"Stopped after {MAX_TURNS} turns without a final answer."
-    return result
+    return
 
 
 if __name__ == "__main__":

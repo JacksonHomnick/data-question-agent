@@ -77,7 +77,7 @@ def build_app() -> App:
     # Bolt fills in these arguments by name: client is Slack's API client.
     @app.event("app_mention")
     def handle_mention(event, say, client):
-        respond(event, say, client.chat_update, lambda question: ask(question, client=gemini))
+        respond(event, say, client.chat_update, lambda question: ask(question, client=gemini, source="slack"))
 
     return app
 
