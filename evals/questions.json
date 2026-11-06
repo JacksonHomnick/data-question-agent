@@ -1,0 +1,22 @@
+[
+  {"id": 1, "question": "How many trips are in the data?", "kind": "number", "reference_sql": "SELECT count(*) FROM trips", "expect_flag": false},
+  {"id": 2, "question": "What was the average fare amount?", "kind": "number", "reference_sql": "SELECT avg(fare_amount) FROM trips", "expect_flag": true, "clean_reference_sql": "SELECT avg(fare_amount) FROM trips_clean"},
+  {"id": 3, "question": "What was the total of all tips?", "kind": "number", "reference_sql": "SELECT sum(tip_amount) FROM trips"},
+  {"id": 4, "question": "Which pickup borough had the most trips?", "kind": "text", "reference_sql": "SELECT z.borough FROM trips t JOIN zones z ON t.pickup_location_id = z.location_id GROUP BY 1 ORDER BY count(*) DESC LIMIT 1", "expect_flag": false},
+  {"id": 5, "question": "Which pickup zone had the most trips?", "kind": "text", "reference_sql": "SELECT z.zone FROM trips t JOIN zones z ON t.pickup_location_id = z.location_id GROUP BY 1 ORDER BY count(*) DESC LIMIT 1", "expect_flag": false},
+  {"id": 6, "question": "How many trips were paid in cash?", "kind": "number", "reference_sql": "SELECT count(*) FROM trips WHERE payment_type = 2", "expect_flag": false},
+  {"id": 7, "question": "What percent of trips were paid by credit card?", "kind": "number", "percent": true, "reference_sql": "SELECT 100.0 * avg(CASE WHEN payment_type = 1 THEN 1 ELSE 0 END) FROM trips"},
+  {"id": 8, "question": "What was the average trip distance in miles?", "kind": "number", "reference_sql": "SELECT avg(trip_distance) FROM trips", "expect_flag": true, "clean_reference_sql": "SELECT avg(trip_distance) FROM trips_clean"},
+  {"id": 9, "question": "Which day had the most trips?", "kind": "text", "reference_sql": "SELECT strftime(CAST(pickup_at AS DATE), '%Y-%m-%d') FROM trips GROUP BY 1 ORDER BY count(*) DESC LIMIT 1"},
+  {"id": 10, "question": "Which hour of the day (0 to 23) had the most pickups?", "kind": "number", "reference_sql": "SELECT hour(pickup_at) FROM trips GROUP BY 1 ORDER BY count(*) DESC LIMIT 1"},
+  {"id": 11, "question": "What was the average tip on credit card trips?", "kind": "number", "reference_sql": "SELECT avg(tip_amount) FROM trips WHERE payment_type = 1"},
+  {"id": 12, "question": "How many trips were picked up at JFK Airport?", "kind": "number", "reference_sql": "SELECT count(*) FROM trips t JOIN zones z ON t.pickup_location_id = z.location_id WHERE z.zone = 'JFK Airport'", "expect_flag": false},
+  {"id": 13, "question": "What was the average total amount for trips picked up at LaGuardia Airport?", "kind": "number", "reference_sql": "SELECT avg(total_amount) FROM trips t JOIN zones z ON t.pickup_location_id = z.location_id WHERE z.zone = 'LaGuardia Airport'"},
+  {"id": 14, "question": "How many trips had more than 4 passengers?", "kind": "number", "reference_sql": "SELECT count(*) FROM trips WHERE passenger_count > 4"},
+  {"id": 15, "question": "What was the longest trip distance recorded?", "kind": "number", "reference_sql": "SELECT max(trip_distance) FROM trips", "expect_flag": true, "clean_reference_sql": "SELECT max(trip_distance) FROM trips_clean"},
+  {"id": 16, "question": "How many trips went from Manhattan to Brooklyn?", "kind": "number", "reference_sql": "SELECT count(*) FROM trips t JOIN zones p ON t.pickup_location_id = p.location_id JOIN zones d ON t.dropoff_location_id = d.location_id WHERE p.borough = 'Manhattan' AND d.borough = 'Brooklyn'", "expect_flag": false},
+  {"id": 17, "question": "What was the average trip duration in minutes?", "kind": "number", "reference_sql": "SELECT avg(date_diff('second', pickup_at, dropoff_at)) / 60.0 FROM trips", "expect_flag": true, "clean_reference_sql": "SELECT avg(date_diff('second', pickup_at, dropoff_at)) / 60.0 FROM trips_clean"},
+  {"id": 18, "question": "Which vendor ID had the most trips?", "kind": "number", "reference_sql": "SELECT vendor_id FROM trips GROUP BY 1 ORDER BY count(*) DESC LIMIT 1", "expect_flag": false},
+  {"id": 19, "question": "How many different pickup location IDs appear in the data?", "kind": "number", "reference_sql": "SELECT count(DISTINCT pickup_location_id) FROM trips", "expect_flag": false},
+  {"id": 20, "question": "What was the total amount charged on weekend trips (Saturday and Sunday)?", "kind": "number", "reference_sql": "SELECT sum(total_amount) FROM trips WHERE isodow(pickup_at) IN (6, 7)"}
+]
