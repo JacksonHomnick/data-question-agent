@@ -84,6 +84,8 @@ python run_evals.py
 
 `@mention` the bot with a question in any channel it's in. It replies in the thread with the answer, a data-quality warning when one applies, a preview of the result, and the SQL. It uses Slack's Socket Mode, so it connects out from your computer and needs no public server. It answers only while `slack_bot.py` is running.
 
+<img src="docs/slack.png" alt="The bot answering the longest-trip question in a Slack thread, with a data quality warning and its SQL" width="480">
+
 Set it up once:
 1. Go to [api.slack.com/apps](https://api.slack.com/apps), click **Create New App**, choose **From a manifest**, pick your workspace, and paste in `slack_manifest.yml`.
 2. Under **Basic Information > App-Level Tokens**, create a token with the `connections:write` scope. It starts with `xapp-`.
