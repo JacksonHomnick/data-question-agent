@@ -1,15 +1,30 @@
 """Web page for the data question agent.
 
 Run:  streamlit run app.py
+
+Hosted on Streamlit Community Cloud, it reads its settings from the app's
+secrets instead of .env, builds the database on first start, and can
+require a password and cap questions per day to protect the free API quota.
 """
 
 from __future__ import annotations
 
+import hmac
 import os
 
 import streamlit as st
 
-from agent import DB_PATH, ask  # importing agent also loads .env
+# On Streamlit Community Cloud, settings come from the app's secrets; copy them into the environment.
+try:
+    for name in ("GEMINI_API_KEY", "APP_PASSWORD", "DAILY_QUESTION_LIMIT"):
+        if name in st.secrets:
+            os.environ.setdefault(name, str(st.secrets[name]))
+except Exception:  # no secrets file when running locally
+    pass
+
+from agent import DB_PATH, ask, questions_logged_today  # noqa: E402  importing agent also loads .env
+
+DAILY_QUESTION_LIMIT = int(os.environ.get("DAILY_QUESTION_LIMIT", "50"))
 
 EXAMPLES = [
     "Which borough had the most pickups?",
@@ -23,13 +38,34 @@ st.set_page_config(page_title="Data Question Agent", page_icon="📊")
 st.title("Data Question Agent")
 st.caption("Ask a question about NYC yellow taxi trips from January 2024. Gemini writes the SQL, runs it, and answers.")
 
-if not DB_PATH.exists():
-    st.error("No database yet. Run `python setup_data.py` first.")
-    st.stop()
-
 if not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
     st.error("No Gemini API key found. Save it in a `.env` file as `GEMINI_API_KEY=...` (see the README), then reload.")
     st.stop()
+
+password = os.environ.get("APP_PASSWORD", "")
+if password and not st.session_state.get("signed_in"):
+    entered = st.text_input("Password", type="password")
+    if not entered:
+        st.stop()
+    if not hmac.compare_digest(entered, password):
+        st.error("Wrong password.")
+        st.stop()
+    st.session_state.signed_in = True
+    st.rerun()
+
+
+@st.cache_resource(show_spinner=False)
+def build_database_once() -> None:
+    """A fresh cloud server has no data/ folder, so download and build it once."""
+    import setup_data
+
+    setup_data.download()
+    setup_data.build_database()
+
+
+if not DB_PATH.exists():
+    with st.spinner("First start: downloading 3 million taxi trips and building the database (about a minute)..."):
+        build_database_once()
 
 if "question" not in st.session_state:
     st.session_state.question = ""
@@ -42,8 +78,11 @@ for i, example in enumerate(EXAMPLES):
 question = st.text_input("Your question", key="question")
 
 if st.button("Ask", type="primary") and question.strip():
+    if questions_logged_today("web") >= DAILY_QUESTION_LIMIT:
+        st.error(f"This demo has hit its limit of {DAILY_QUESTION_LIMIT} questions today. Try again tomorrow.")
+        st.stop()
     with st.spinner("Writing and running SQL..."):
-        result = ask(question.strip())
+        result = ask(question.strip(), source="web")
 
     if result.error:
         st.error(result.error)
