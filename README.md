@@ -38,7 +38,7 @@ The rules are stored in a `quality_rules` table, and a `trips_clean` view leaves
 |---|---|---|
 | Longest trip distance | 312,722.3 miles | 97.5 miles |
 | Average trip distance | 3.65 miles | 3.30 miles |
-| Which borough had the most pickups | Manhattan | No flag: counting trips reads no flagged column |
+| Which borough had the most pickups | Manhattan | Same answer, no warning: this question only counts trips, and the rules check distance, fares, times, and passengers |
 
 ## Test score
 
