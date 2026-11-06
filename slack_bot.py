@@ -11,9 +11,12 @@ from __future__ import annotations
 
 import os
 import re
+import ssl
 
+import certifi
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
+from slack_sdk import WebClient
 
 from agent import Result, ask, make_client  # importing agent also loads .env
 
@@ -65,7 +68,10 @@ def respond(event: dict, say, update, ask_fn) -> None:
 
 
 def build_app() -> App:
-    app = App(token=os.environ["SLACK_BOT_TOKEN"])
+    # python.org's Python can't find the Mac's certificates, so use certifi's.
+    # The Socket Mode connection reuses this client's SSL settings.
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
+    app = App(client=WebClient(token=os.environ["SLACK_BOT_TOKEN"], ssl=ssl_context))
     gemini = make_client()
 
     # Bolt fills in these arguments by name: client is Slack's API client.
