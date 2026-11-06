@@ -2,6 +2,8 @@
 
 Ask a question about data in plain English. The agent writes the SQL, runs it, checks the result, and answers with a chart. It also flags bad records and shows how they change the answer.
 
+**Live demo: [jackson-data-question-agent.streamlit.app](https://jackson-data-question-agent.streamlit.app)**
+
 ![The agent answering "What was the longest trip distance recorded?" with a data quality warning](docs/screenshot.png)
 
 ## The problem
@@ -95,6 +97,8 @@ To add it to Claude Desktop, put this in its config file (Settings > Developer >
 ```
 
 ## Live demo
+
+Try it: **[jackson-data-question-agent.streamlit.app](https://jackson-data-question-agent.streamlit.app)**
 
 The web page runs on Streamlit Community Cloud. On a fresh server it downloads the data and builds the database on first start (about a minute). Its secrets hold the Gemini key, an optional `APP_PASSWORD`, and `DAILY_QUESTION_LIMIT` (default 50), which protects the free API quota.
 
