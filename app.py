@@ -5,9 +5,11 @@ Run:  streamlit run app.py
 
 from __future__ import annotations
 
+import os
+
 import streamlit as st
 
-from agent import DB_PATH, ask
+from agent import DB_PATH, ask  # importing agent also loads .env
 
 EXAMPLES = [
     "Which borough had the most pickups?",
@@ -25,12 +27,16 @@ if not DB_PATH.exists():
     st.error("No database yet. Run `python setup_data.py` first.")
     st.stop()
 
+if not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
+    st.error("No Gemini API key found. Save it in a `.env` file as `GEMINI_API_KEY=...` (see the README), then reload.")
+    st.stop()
+
 if "question" not in st.session_state:
     st.session_state.question = ""
 
 cols = st.columns(2)
 for i, example in enumerate(EXAMPLES):
-    if cols[i % 2].button(example, use_container_width=True):
+    if cols[i % 2].button(example, width="stretch"):
         st.session_state.question = example
 
 question = st.text_input("Your question", key="question")
@@ -53,14 +59,14 @@ if st.button("Ask", type="primary") and question.strip():
                 st.bar_chart(data, x=result.x, y=result.y)
 
         if data is not None:
-            st.dataframe(data, use_container_width=True, hide_index=True)
+            st.dataframe(data, width="stretch", hide_index=True)
 
         if result.quality_note:
             st.subheader("Data quality")
             st.warning(result.quality_note)
             if result.clean_data is not None:
                 with st.expander("Answer without flagged records"):
-                    st.dataframe(result.clean_data, use_container_width=True, hide_index=True)
+                    st.dataframe(result.clean_data, width="stretch", hide_index=True)
                     st.code(result.clean_sql, language="sql")
 
         if result.sql:
