@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hmac
 import os
+import re
 
 import streamlit as st
 
@@ -25,6 +26,13 @@ except Exception:  # no secrets file when running locally
 from agent import DB_PATH, ask, questions_logged_today  # noqa: E402  importing agent also loads .env
 
 DAILY_QUESTION_LIMIT = int(os.environ.get("DAILY_QUESTION_LIMIT", "50"))
+
+def plain_markdown(text: str) -> str:
+    """Model text for a box that renders markdown: escape every symbol and break web addresses,
+    so a tricked model can't show links, images, or math formatting."""
+    text = re.sub(r"([!-/:-@\[-`{-~])", r"\\\1", text)
+    return text.replace("\\:\\/\\/", "\\:\u200b\\/\\/").replace("www\\.", "www\u200b\\.")
+
 
 EXAMPLES = [
     "Which borough had the most pickups?",
@@ -88,7 +96,7 @@ if st.button("Ask", type="primary") and question.strip():
         st.error(result.error)
     else:
         st.subheader("Answer")
-        st.write(result.answer)
+        st.text(result.answer)  # plain text: the model's words never render as links or images
 
         data = result.data
         if data is not None and result.chart != "none" and result.x in data.columns and result.y in data.columns:
@@ -102,7 +110,7 @@ if st.button("Ask", type="primary") and question.strip():
 
         if result.quality_note:
             st.subheader("Data quality")
-            st.warning(result.quality_note)
+            st.warning(plain_markdown(result.quality_note))
             if result.clean_data is not None:
                 with st.expander("Answer without flagged records"):
                     st.dataframe(result.clean_data, width="stretch", hide_index=True)

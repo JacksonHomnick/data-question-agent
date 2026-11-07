@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -34,6 +35,9 @@ MAX_TURNS = 8
 ROWS_SHOWN_TO_MODEL = 50
 MAX_ROWS = 10_000
 RATE_LIMIT_RETRIES = 3
+# One runaway query (say, every trip joined to every other trip) shouldn't freeze a small server.
+QUERY_TIMEOUT_SECONDS = 30
+MEMORY_LIMIT = "1GB"
 
 
 def load_env() -> None:
@@ -178,7 +182,7 @@ def connect() -> duckdb.DuckDBPyConnection:
     return duckdb.connect(
         str(DB_PATH),
         read_only=True,
-        config={"enable_external_access": False, "lock_configuration": True},
+        config={"enable_external_access": False, "memory_limit": MEMORY_LIMIT, "lock_configuration": True},
     )
 
 
@@ -236,9 +240,14 @@ def run_query(sql: str) -> pd.DataFrame:
         raise ValueError("Send one query at a time.")
     # connect() is read-only, so DuckDB itself refuses any write.
     con = connect()
+    timer = threading.Timer(QUERY_TIMEOUT_SECONDS, con.interrupt)
+    timer.start()
     try:
         return con.execute(f"SELECT * FROM ({cleaned}) LIMIT {MAX_ROWS}").fetchdf()
+    except duckdb.InterruptException:
+        raise ValueError(f"The query ran longer than {QUERY_TIMEOUT_SECONDS} seconds and was stopped. Try a simpler query.") from None
     finally:
+        timer.cancel()
         con.close()
 
 
