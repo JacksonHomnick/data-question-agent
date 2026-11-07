@@ -169,8 +169,21 @@ def questions_logged_today(source: str) -> int:
     return sum(1 for r in records if r["at"].startswith(today) and r["source"] == source)
 
 
+def connect() -> duckdb.DuckDBPyConnection:
+    """Open the database read-only, with no access to files, folders, or URLs outside it.
+
+    Without this, a SELECT could call read_text() or glob() and read the
+    server's files, including the app's secrets.
+    """
+    return duckdb.connect(
+        str(DB_PATH),
+        read_only=True,
+        config={"enable_external_access": False, "lock_configuration": True},
+    )
+
+
 def describe_schema() -> str:
-    con = duckdb.connect(str(DB_PATH), read_only=True)
+    con = connect()
     rows = con.execute("""
         SELECT table_name, column_name, data_type
         FROM information_schema.columns
@@ -195,7 +208,7 @@ def describe_schema() -> str:
 
 def flagged_columns() -> set[str]:
     """Every trips column that at least one quality rule affects."""
-    con = duckdb.connect(str(DB_PATH), read_only=True)
+    con = connect()
     rows = con.execute("SELECT columns_affected FROM quality_rules").fetchall()
     con.close()
     return {col.strip() for (cols,) in rows for col in cols.split(",")}
@@ -207,7 +220,7 @@ def reads_flagged_column(sql: str) -> bool:
 
 
 def describe_rules() -> str:
-    con = duckdb.connect(str(DB_PATH), read_only=True)
+    con = connect()
     rows = con.execute("SELECT rule, columns_affected, rows_flagged FROM quality_rules").fetchall()
     con.close()
     return "\n".join(f"- {rule} (affects {columns}): {flagged:,} rows" for rule, columns, flagged in rows)
@@ -221,8 +234,8 @@ def run_query(sql: str) -> pd.DataFrame:
         raise ValueError("Only SELECT or WITH queries are allowed.")
     if ";" in cleaned:
         raise ValueError("Send one query at a time.")
-    # read_only=True means DuckDB itself refuses any write.
-    con = duckdb.connect(str(DB_PATH), read_only=True)
+    # connect() is read-only, so DuckDB itself refuses any write.
+    con = connect()
     try:
         return con.execute(f"SELECT * FROM ({cleaned}) LIMIT {MAX_ROWS}").fetchdf()
     finally:
